@@ -1,0 +1,25 @@
+{
+  "name": "bike-api",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+ "scripts": {
+  "server": "node server/server.js",
+  "sim": "node server/simulator.js",
+  "start": "npm-run-all --parallel server sim"
+},
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "mqtt": "^5.14.1",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "npm-run-all": "^4.1.5"
+  }
+}
