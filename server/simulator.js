@@ -1,83 +1,170 @@
+require("dotenv").config();
 const mqtt = require("mqtt");
 
-const GROUP = "ecu";
-const DEVICE_ID = "SIMBIKE01";
+// ===== CONFIG =====
+const GROUP     = process.env.MQTT_GROUP || "ecu";
+const DEVICE_ID = process.env.DEVICE_ID || "SIMBIKE01";
 
-const client = mqtt.connect("mqtt://localhost:1883");
+const MQTT_HOST = process.env.MQTT_HOST;
+const MQTT_USER = process.env.MQTT_USER;
+const MQTT_PASS = process.env.MQTT_PASS;
 
-const start = { lat: 19.284, lng: -99.655 };
+// ===== ESTACIONES =====
+const start = {
+  lat: Number(process.env.START_LAT || 19.2840),
+  lng: Number(process.env.START_LNG || -99.6550)
+};
+
+const target = {
+  lat: Number(process.env.TARGET_LAT || 19.2900),
+  lng: Number(process.env.TARGET_LNG || -99.6500)
+};
+
+// ===== ESTADO DE LA BICI =====
 let lat = start.lat;
 let lng = start.lng;
-
-const target = { lat: 19.290, lng: -99.650 };
 
 let moving = false;
 let progress = 0;
 
-client.on("connect", () => {
-  client.subscribe(`ecu/cd/${GROUP}/${DEVICE_ID}`);
+let state = "IDLE";     
+let sendGps = false;
 
-  setInterval(() => {
-    if (moving) moveBike();
-    sendGPS();
-  }, 200);
+let lastLat = lat;
+let lastLng = lng;
+
+// ===== CONEXIÓN MQTT =====
+const client = mqtt.connect(MQTT_HOST, {
+  username: MQTT_USER,
+  password: MQTT_PASS,
+  clientId: `sim-${DEVICE_ID}`,
+  clean: true,
+  reconnectPeriod: 3000,
+  keepalive: 60
 });
 
+client.on("connect", () => {
+  console.log("Simulador conectado a EMQX");
+  console.log(`Suscrito a ecu/cd/${GROUP}/${DEVICE_ID}`);
+
+  client.subscribe(`ecu/cd/${GROUP}/${DEVICE_ID}`);
+  setInterval(loop, 1000);
+});
+
+client.on("reconnect", () => {
+  console.log("Reintentando conexión MQTT...");
+});
+
+client.on("error", (err) => {
+  console.error("Error MQTT:", err.message);
+});
+
+// ===== LOOP =====
+function loop() {
+  if (moving) moveBike();
+  detectTheft();
+
+  if (sendGps) {
+    sendGPS();
+  }
+}
+
+// ===== COMANDOS =====
 client.on("message", (topic, msg) => {
   const data = JSON.parse(msg.toString());
+  console.log("CMD recibido:", data);
 
+  // LOCK / UNLOCK
   if (data.c === 4) {
     const defend = data.param?.defend;
+
+    // UNLOCK
     if (defend === 0) {
+      console.log("Inicio de viaje");
+      state = "IN_USE";
       moving = true;
+      sendGps = true;
       progress = 0;
     }
-    if (defend === 1) moving = false;
 
-    client.publish(
-      `ecu/rsp/${GROUP}/${DEVICE_ID}`,
-      JSON.stringify({ tid: data.tid, code: 0 })
-    );
+    // LOCK
+    if (defend === 1) {
+      console.log("Fin de viaje");
+      state = "IDLE";
+      moving = false;
+      sendGps = false;
+    }
+
+    respondOK(data.tid);
   }
 
+  // RESET
   if (data.c === 99) {
+    console.log("Reset de bici");
+    state = "IDLE";
     moving = false;
+    sendGps = false;
     lat = start.lat;
     lng = start.lng;
     progress = 0;
-
-    client.publish(
-      `ecu/rsp/${GROUP}/${DEVICE_ID}`,
-      JSON.stringify({ tid: data.tid, code: 0 })
-    );
+    respondOK(data.tid);
   }
 });
 
+// ===== RESPUESTA =====
+function respondOK(tid) {
+  client.publish(
+    `ecu/rsp/${GROUP}/${DEVICE_ID}`,
+    JSON.stringify({ tid, code: 0 })
+  );
+}
+
+// ===== MOVIMIENTO =====
 function moveBike() {
-  progress += 0.02;
+  progress += 0.08;
+
   if (progress >= 1) {
     progress = 1;
     moving = false;
+    sendGps = false;
+    state = "IDLE";
+    console.log("Llegó a estación destino");
   }
 
-  const ease = progress < 0.5
-    ? 2 * progress * progress
-    : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+  lat = start.lat + (target.lat - start.lat) * progress;
+  lng = start.lng + (target.lng - start.lng) * progress;
 
-  lat = start.lat + (target.lat - start.lat) * ease;
-  lng = start.lng + (target.lng - start.lng) * ease;
+  console.log(`GPS -> ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
 }
 
-function sendGPS() {
-  const payload = {
-    c: 56,
-    param: {
-      latitude: lat,
-      longitude: lng,
-      speed: moving ? 10 : 0,
-      timestamp: Date.now()
-    }
-  };
+// ===== DETECCIÓN DE ROBO =====
+function detectTheft() {
+  const distance =
+    Math.abs(lat - lastLat) + Math.abs(lng - lastLng);
 
-  client.publish(`ecu/rpt/${GROUP}/${DEVICE_ID}`, JSON.stringify(payload));
+  if (state === "IDLE" && distance > 0.00005) {
+    console.log("Movimiento no autorizado detectado");
+    state = "STOLEN";
+    sendGps = true;
+  }
+
+  lastLat = lat;
+  lastLng = lng;
+}
+
+// ===== GPS =====
+function sendGPS() {
+  client.publish(
+    `ecu/rpt/${GROUP}/${DEVICE_ID}`,
+    JSON.stringify({
+      c: 56,
+      param: {
+        latitude: lat,
+        longitude: lng,
+        speed: moving ? 12 : 0,
+        alarm: state === "STOLEN" ? 1 : 0,
+        timestamp: Date.now()
+      }
+    })
+  );
 }

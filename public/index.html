@@ -1,38 +1,49 @@
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
-    <meta charset="UTF-8" />
-    <title>Demo Bicicletas</title>
+  <meta charset="UTF-8" />
+  <title>eBici · Panel de Pruebas</title>
 
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <!-- Leaflet -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet/dist/leaflet.css"
+  />
 
-    <link rel="stylesheet" href="css/styles.css" />
+  <!-- Styles -->
+  <link rel="stylesheet" href="css/styles.css" />
 </head>
 
 <body>
-    <div id="map"></div>
+  <div id="map"></div>
 
-    <div id="panel">
-        <h2>Demo Bicicletas</h2>
-
-        <p><b>Bici activa:</b> <span id="bikeId">SIMBIKE01</span></p>
-
-        <button id="btnTake">Tomar bici</button>
-        <button id="btnDeliver" disabled>Entregar bici</button>
-        <button id="btnReset">Reiniciar bici</button>
-        <button id="btnClear">Limpiar consolas</button>
-
-        <p class="title-small">Comandos enviados</p>
-        <div id="cmdConsole" class="console-box"></div>
-
-        <p class="title-small">Mensajes recibidos</p>
-        <div id="msgConsole" class="console-box"></div>
+  <div id="panel">
+    <div class="panel-header">
+      <h2>Panel de Bicicleta</h2>
+      <span>Modo pruebas / laboratorio</span>
     </div>
 
-    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-    <script src="js/app.js"></script>
-</body>
+    <div class="info-card">
+      <b>Bici activa:</b>
+      <span id="bikeId">SIMBIKE01</span>
+    </div>
 
+    <button id="btnTake">Tomar bicicleta</button>
+    <button id="btnDeliver" disabled>Entregar bicicleta</button>
+    <button id="btnReset">Reiniciar dispositivo</button>
+    <button id="btnClear">Limpiar consolas</button>
+
+    <p class="title-small">Comandos enviados</p>
+    <div id="cmdConsole" class="console-box"></div>
+
+    <p class="title-small">Mensajes recibidos</p>
+    <div id="msgConsole" class="console-box"></div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <!-- App -->
+  <script src="js/app.js"></script>
+</body>
 </html>

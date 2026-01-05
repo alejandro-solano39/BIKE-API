@@ -6,14 +6,14 @@ const mqtt = require("mqtt");
 const crypto = require("crypto");
 const cors = require("cors");
 
-// ---------- Configuración ----------
-const MQTT_HOST = process.env.MQTT_HOST 
-const MQTT_USER = process.env.MQTT_USER 
-const MQTT_PASS = process.env.MQTT_PASS 
-const MQTT_GROUP = process.env.MQTT_GROUP 
+// ---------- CONFIGURACIÓN ----------
+const MQTT_HOST  = process.env.MQTT_HOST;
+const MQTT_USER  = process.env.MQTT_USER;
+const MQTT_PASS  = process.env.MQTT_PASS;
+const MQTT_GROUP = process.env.MQTT_GROUP || "ecu";
+const PORT       = process.env.PORT || 3000;
 
-const PORT = process.env.PORT || 3000;
-
+// ---------- APP ----------
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
@@ -22,18 +22,19 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static("public"));
 
-// Estado en memoria: última ubicación por bicicleta
-const bikeState = new Map(); 
+const bikeState = new Map();
 
 // ---------- MQTT ----------
 const mqttClient = mqtt.connect(MQTT_HOST, {
   username: MQTT_USER,
-  password: MQTT_PASS
+  password: MQTT_PASS,
+  reconnectPeriod: 3000,
+  keepalive: 60
 });
 
 mqttClient.on("connect", () => {
   console.log("Conectado a MQTT:", MQTT_HOST);
-  mqttClient.subscribe("ecu/rsp/+/+"); 
+  mqttClient.subscribe("ecu/rsp/+/+");
   mqttClient.subscribe("ecu/rpt/+/+");
 });
 
@@ -64,7 +65,6 @@ mqttClient.on("message", (topic, buf) => {
   const msg = { topic, type, group, deviceId, payload };
   const msgStr = JSON.stringify(msg);
 
-  // Broadcast a todos los clientes WebSocket
   wss.clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
       client.send(msgStr);
@@ -72,24 +72,40 @@ mqttClient.on("message", (topic, buf) => {
   });
 });
 
-// Procesar reportes (GPS)
+// ---------- PROCESAR REPORTES ----------
 function handleReport(deviceId, payload) {
   const param = payload.param || payload;
 
-  if (param.latitude !== undefined && param.longitude !== undefined) {
-    const gps = {
-      lat: param.latitude,
-      lng: param.longitude,
-      speed: param.speed || 0,
-      time: param.timestamp || Date.now()
-    };
+  if (param.latitude === undefined || param.longitude === undefined) return;
 
-    bikeState.set(deviceId, { gps, lastUpdate: new Date() });
-    console.log(`GPS ${deviceId}:`, gps.lat, gps.lng);
-  }
+  let state = "IDLE";
+  if (param.alarm === 1) state = "STOLEN";
+  else if ((param.speed || 0) > 0) state = "IN_USE";
+
+  const gps = {
+    lat: param.latitude,
+    lng: param.longitude,
+    speed: param.speed || 0,
+    alarm: param.alarm || 0,
+    time: param.timestamp || Date.now()
+  };
+
+  bikeState.set(deviceId, {
+    gps,
+    state,
+    lastUpdate: new Date()
+  });
+
+  console.log(
+    `GPS ${deviceId}:`,
+    gps.lat,
+    gps.lng,
+    "state:",
+    state
+  );
 }
 
-// Enviar comandos a la bici
+// ---------- ENVIAR COMANDOS ----------
 function sendCommand(deviceId, cmd, param = {}) {
   const tid = crypto.randomUUID();
   const topic = `ecu/cd/${MQTT_GROUP}/${deviceId}`;
@@ -108,26 +124,26 @@ function sendCommand(deviceId, cmd, param = {}) {
   return tid;
 }
 
-// ---------- Endpoints REST ----------
+// ---------- ENDPOINTS REST ----------
 
-// Desbloquear
+// Unlock
 app.post("/bike/:id/unlock", (req, res) => {
   const deviceId = req.params.id;
   const tid = sendCommand(deviceId, 4, { defend: 0 });
   res.json({ status: "sent", cmd: 4, defend: 0, tid, deviceId });
 });
 
-// Bloquear
+// Lock
 app.post("/bike/:id/lock", (req, res) => {
   const deviceId = req.params.id;
   const tid = sendCommand(deviceId, 4, { defend: 1 });
   res.json({ status: "sent", cmd: 4, defend: 1, tid, deviceId });
 });
 
-// Reiniciar bicicleta (cmd 99)
+// Reset
 app.post("/bike/:id/reset", (req, res) => {
   const deviceId = req.params.id;
-  const tid = sendCommand(deviceId, 99, {}); 
+  const tid = sendCommand(deviceId, 99);
   res.json({ status: "sent", cmd: 99, tid, deviceId });
 });
 
@@ -135,10 +151,29 @@ app.post("/bike/:id/reset", (req, res) => {
 app.get("/bike/:id/location", (req, res) => {
   const deviceId = req.params.id;
   const state = bikeState.get(deviceId);
+
   if (!state || !state.gps) {
-    return res.status(404).json({ error: "Sin ubicación registrada para esta bici" });
+    return res.status(404).json({ error: "Sin ubicación registrada" });
   }
+
   res.json(state.gps);
+});
+
+// Estado completo
+app.get("/bike/:id/state", (req, res) => {
+  const deviceId = req.params.id;
+  const state = bikeState.get(deviceId);
+
+  if (!state) {
+    return res.status(404).json({ error: "Bici no registrada" });
+  }
+
+  res.json({
+    deviceId,
+    state: state.state,
+    gps: state.gps,
+    lastUpdate: state.lastUpdate
+  });
 });
 
 // ---------- WEBSOCKET ----------
